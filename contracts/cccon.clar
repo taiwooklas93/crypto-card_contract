@@ -274,5 +274,150 @@
   
 
 
+(define-public (list-card-for-sale (card-id uint) (price uint) (expires-in uint))
+ (let (
+   (expires-at (+ block-height expires-in))
+ )
+   (asserts! (var-get marketplace-enabled) err-marketplace-disabled)
+   (asserts! (is-owner card-id) err-not-authorized)
+   (asserts! (check-card-not-locked card-id) err-card-locked)
+  
+   (map-set marketplace-listings card-id
+     {
+       seller: tx-sender,
+       price: price,
+       listed-at: block-height,
+       expires-at: expires-at
+     }
+   )
+  
+   (map-set card-status card-id
+     (merge
+       (default-to
+         {locked: false, cooldown-until: u0, last-action: block-height, upgrade-count: u0}
+         (map-get? card-status card-id)
+       )
+       {locked: true}
+     )
+   )
+  
+   (ok true)
+ )
+)
+
+
+(define-public (cancel-listing (card-id uint))
+ (let (
+   (listing (unwrap! (map-get? marketplace-listings card-id) err-not-found))
+ )
+
+  (asserts! (is-eq (get seller listing) tx-sender) err-not-authorized)
+  
+   (map-delete marketplace-listings card-id)
+   (map-set card-status card-id
+     (merge
+       (default-to
+         {locked: true, cooldown-until: u0, last-action: block-height, upgrade-count: u0}
+         (map-get? card-status card-id)
+       )
+       {locked: false}
+     )
+   )
+  
+   (ok true)
+ )
+)
+ 
+(define-public (buy-card (card-id uint))
+ (let (
+   (listing (unwrap! (map-get? marketplace-listings card-id) err-not-found))
+   (seller (get seller listing))
+   (price (get price listing))
+   (fee (calculate-fee price))
+   (seller-amount (- price fee))
+ )
+   (asserts! (var-get marketplace-enabled) err-marketplace-disabled)
+   (asserts! (<= block-height (get expires-at listing)) err-not-found)
+  
+   ;; Transfer STX from buyer to seller and pay fee
+   (try! (stx-transfer? price tx-sender seller))
+  
+   ;; Transfer NFT ownership
+   (try! (nft-transfer? crypto-card card-id seller tx-sender))
+   (map-set card-ownership card-id tx-sender)
+  
+   ;; Update card status
+   (map-set card-status card-id
+     (merge
+       (default-to
+         {locked: true, cooldown-until: u0, last-action: block-height, upgrade-count: u0}
+         (map-get? card-status card-id)
+       )
+       {locked: false, last-action: block-height}
+     )
+   )
+  
+   ;; Remove listing
+   (map-delete marketplace-listings card-id)
+  
+   ;; Update stats
+   (increment-user-stat tx-sender "cards-owned")
+   (increment-user-stat tx-sender "cards-purchased")
+   (increment-user-stat seller "cards-sold")
+   (var-set total-)
+)
+ 
+(define-public (add-card-experience (card-id uint) (amount uint))
+ (let (
+   (card (unwrap! (map-get? card-details card-id) err-not-found))
+   (current-exp (get experience card))
+   (new-exp (+ current-exp amount))
+ )
+   (asserts! (is-owner card-id) err-not-authorized)
+   (asserts! (check-card-not-locked card-id) err-card-locked)
+  
+   (map-set card-details card-id (merge card {experience: new-exp}))
+  
+   (ok new-exp)
+ )
+)
+
+
+(define-public (upgrade-card-level (card-id uint))
+ (let (
+   (card (unwrap! (map-get? card-details card-id) err-not-found))
+   (current-level (get level card))
+   (current-exp (get experience card))
+   (required-exp (* current-level u100))
+   (status (default-to
+             {locked: false, cooldown-until: u0, last-action: u0, upgrade-count: u0}
+             (map-get? card-status card-id)))
+ )
+   (asserts! (is-owner card-id) err-not-authorized)
+   (asserts! (check-card-not-locked card-id) err-card-locked)
+   (asserts! (>= current-exp required-exp) err-upgrade-requirements)
+  
+   (map-set card-details card-id
+     (merge card
+       {
+         level: (+ current-level u1),
+         experience: (- current-exp required-exp)
+       }
+     )
+   )
+ 
+   (map-set card-status card-id
+     (merge status
+       {
+         upgrade-count: (+ (get upgrade-count status) u1),
+         last-action: block-height
+       }
+     )
+   )
+  
+   (ok (+ current-level u1))
+ )
+)
+
 
 
