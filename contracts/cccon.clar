@@ -419,5 +419,42 @@
  )
 )
 
+ 
+;; read-only functions
+(define-read-only (get-card-details (card-id uint))
+ (ok (unwrap! (map-get? card-details card-id) err-not-found))
+)
+
+
+(define-read-only (get-card-owner (card-id uint))
+ (ok (unwrap! (map-get? card-ownership card-id) err-not-found))
+)
+
+
+(define-read-only (get-card-status (card-id uint))
+ (ok (default-to
+   {locked: false, cooldown-until: u0, last-action: u0, upgrade-count: u0}
+   (map-get? card-status card-id)))
+)
+
+
+(define-read-only (get-user-stats (user principal))
+ (ok (default-to
+   {
+     cards-owned: u0,
+     cards-created: u0,
+     cards-sold: u0,
+     cards-purchased: u0,
+     total-spent: u0,
+     total-earned: u0
+   }
+   (map-get? user-stats user)))
+)
+
+
+(define-read-only (get-last-card-id)
+ (ok (var-get last-card-id))
+)
+
 
 
