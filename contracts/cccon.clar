@@ -26,8 +26,6 @@
 (define-constant rarity-mythic u6)
 
 
-
-
 ;; data maps and vars
 (define-non-fungible-token crypto-card uint)
 
@@ -67,3 +65,214 @@
    expires-at: uint
  }
 )
+
+
+(define-map user-stats principal
+ {
+   cards-owned: uint,
+   cards-created: uint,
+   cards-sold: uint,
+   cards-purchased: uint,
+   total-spent: uint,
+   total-earned: uint
+ }
+)
+
+
+(define-map rarity-requirements uint
+ {
+   base-price: uint,
+   max-supply: uint,
+   current-supply: uint
+ }
+)
+
+
+(define-map series-info (string-ascii 32)
+ {
+   name: (string-ascii 64),
+   description: (string-ascii 256),
+   creator: principal,
+   created-at: uint,
+   card-count: uint,
+   is-limited: bool,
+   max-cards: uint
+ }
+)
+
+
+(define-data-var last-card-id uint u0)
+(define-data-var marketplace-fee uint u25) ;; 2.5% fee (in basis points)
+(define-data-var marketplace-enabled bool true)
+(define-data-var total-cards-created uint u0)
+(define-data-var total-cards-traded uint u0)
+(define-data-var total-marketplace-volume uint u0)
+
+;; private functions
+(define-private (is-owner (card-id uint))
+ (let ((owner (unwrap! (map-get? card-ownership card-id) false)))
+   (is-eq tx-sender owner)
+ )
+)
+
+
+(define-private (is-contract-owner)
+ (is-eq tx-sender contract-owner)
+)
+
+
+(define-private (calculate-fee (amount uint))
+ (/ (* amount (var-get marketplace-fee)) u1000)
+)
+
+
+(define-private (update-user-stat (user principal) (stat-key (string-ascii 20)) (value uint))
+ (let (
+   (current-stats (default-to
+     {
+       cards-owned: u0,
+       cards-created: u0,
+       cards-sold: u0,
+       cards-purchased: u0,
+       total-spent: u0,
+       total-earned: u0
+     }
+     (map-get? user-stats user)))
+   (updated-stats
+     (if (is-eq stat-key "cards-owned")
+       (merge current-stats {cards-owned: value})
+       (if (is-eq stat-key "cards-created")
+         (merge current-stats {cards-created: value})
+         (if (is-eq stat-key "cards-sold")
+           (merge current-stats {cards-sold: value})
+           (if (is-eq stat-key "cards-purchased")
+             (merge current-stats {cards-purchased: value})
+             (if (is-eq stat-key "total-spent")
+               (merge current-stats {total-spent: value})
+               (if (is-eq stat-key "total-earned")
+                 (merge current-stats {total-earned: value})
+                 current-stats
+               )
+             )
+           )
+         )
+       )
+     )
+   )
+ )
+   (map-set user-stats user updated-stats)
+ )
+)
+(define-private (increment-user-stat (user principal) (stat-key (string-ascii 20)))
+ (let (
+   (current-stats (default-to
+     {
+       cards-owned: u0,
+       cards-created: u0,
+       cards-sold: u0,
+       cards-purchased: u0,
+       total-spent: u0,
+       total-earned: u0
+     }
+     (map-get? user-stats user)))
+   (updated-stats
+     (if (is-eq stat-key "cards-owned")
+       (merge current-stats {cards-owned: (+ (get cards-owned current-stats) u1)})
+       (if (is-eq stat-key "cards-created")
+         (merge current-stats {cards-created: (+ (get cards-created current-stats) u1)})
+         (if (is-eq stat-key "cards-sold")
+           (merge current-stats {cards-sold: (+ (get cards-sold current-stats) u1)})
+           (if (is-eq stat-key "cards-purchased")
+             (merge current-stats {cards-purchased: (+ (get cards-purchased current-stats) u1)})
+             current-stats
+           )
+         )
+       )
+     )
+   )
+ )
+   (map-set user-stats user updated-stats)
+ )
+)
+
+
+(define-private (is-valid-rarity (rarity uint))
+ (and (>= rarity rarity-common) (<= rarity rarity-mythic))
+)
+(define-private (check-card-not-locked (card-id uint))
+ (let (
+   (status (default-to {locked: false, cooldown-until: u0, last-action: u0, upgrade-count: u0}
+            (map-get? card-status card-id)))
+ )
+   (not (get locked status))
+ )
+)
+
+
+;; public functions
+(define-public (create-card (name (string-ascii 64))
+                          (description (string-ascii 256))
+                          (image-uri (string-utf8 256))
+                          (rarity uint)
+                          (attributes (list 10 {trait: (string-ascii 32), value: (string-ascii 32)}))
+                          (series (string-ascii 32)))
+ (let
+   (
+     (new-id (+ (var-get last-card-id) u1))
+   )
+   (asserts! (is-valid-rarity rarity) err-invalid-rarity)
+   (try! (nft-mint? crypto-card new-id tx-sender))
+  
+   (map-set card-details new-id
+     {
+       name: name,
+       description: description,
+       image-uri: image-uri,
+       rarity: rarity,
+       attributes: attributes,
+       created-at: block-height,
+       level: u1,
+       experience: u0,
+       edition: u1,
+       series: series
+     }
+   )
+  (map-set card-ownership new-id tx-sender)
+   (map-set card-status new-id
+     {
+       locked: false,
+       cooldown-until: u0,
+       last-action: block-height,
+       upgrade-count: u0
+     }
+   )
+  
+   (var-set last-card-id new-id)
+   (var-set total-cards-created (+ (var-get total-cards-created) u1))
+  
+   (increment-user-stat tx-sender "cards-owned")
+   (increment-user-stat tx-sender "cards-created")
+  
+   (ok new-id)
+ )
+)
+
+
+(define-public (transfer-card (card-id uint) (recipient principal))
+ (begin
+   (asserts! (is-owner card-id) err-not-authorized)
+   (asserts! (check-card-not-locked card-id) err-card-locked)
+  
+   (try! (nft-transfer? crypto-card card-id tx-sender recipient))
+   (map-set card-ownership card-id recipient)
+  
+   (increment-user-stat recipient "cards-owned")
+  
+   (ok true)
+ )
+)
+  
+
+
+
+
