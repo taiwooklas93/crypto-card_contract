@@ -274,5 +274,59 @@
   
 
 
+(define-public (list-card-for-sale (card-id uint) (price uint) (expires-in uint))
+ (let (
+   (expires-at (+ block-height expires-in))
+ )
+   (asserts! (var-get marketplace-enabled) err-marketplace-disabled)
+   (asserts! (is-owner card-id) err-not-authorized)
+   (asserts! (check-card-not-locked card-id) err-card-locked)
+  
+   (map-set marketplace-listings card-id
+     {
+       seller: tx-sender,
+       price: price,
+       listed-at: block-height,
+       expires-at: expires-at
+     }
+   )
+  
+   (map-set card-status card-id
+     (merge
+       (default-to
+         {locked: false, cooldown-until: u0, last-action: block-height, upgrade-count: u0}
+         (map-get? card-status card-id)
+       )
+       {locked: true}
+     )
+   )
+  
+   (ok true)
+ )
+)
+
+
+(define-public (cancel-listing (card-id uint))
+ (let (
+   (listing (unwrap! (map-get? marketplace-listings card-id) err-not-found))
+ )
+
+  (asserts! (is-eq (get seller listing) tx-sender) err-not-authorized)
+  
+   (map-delete marketplace-listings card-id)
+   (map-set card-status card-id
+     (merge
+       (default-to
+         {locked: true, cooldown-until: u0, last-action: block-height, upgrade-count: u0}
+         (map-get? card-status card-id)
+       )
+       {locked: false}
+     )
+   )
+  
+   (ok true)
+ )
+)
+
 
 
