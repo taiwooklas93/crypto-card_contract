@@ -108,6 +108,7 @@
 (define-data-var total-cards-traded uint u0)
 (define-data-var total-marketplace-volume uint u0)
 
+
 ;; private functions
 (define-private (is-owner (card-id uint))
  (let ((owner (unwrap! (map-get? card-ownership card-id) false)))
@@ -163,6 +164,8 @@
    (map-set user-stats user updated-stats)
  )
 )
+
+
 (define-private (increment-user-stat (user principal) (stat-key (string-ascii 20)))
  (let (
    (current-stats (default-to
@@ -199,6 +202,8 @@
 (define-private (is-valid-rarity (rarity uint))
  (and (>= rarity rarity-common) (<= rarity rarity-mythic))
 )
+
+
 (define-private (check-card-not-locked (card-id uint))
  (let (
    (status (default-to {locked: false, cooldown-until: u0, last-action: u0, upgrade-count: u0}
@@ -237,7 +242,8 @@
        series: series
      }
    )
-  (map-set card-ownership new-id tx-sender)
+  
+   (map-set card-ownership new-id tx-sender)
    (map-set card-status new-id
      {
        locked: false,
@@ -271,7 +277,6 @@
    (ok true)
  )
 )
-  
 
 
 (define-public (list-card-for-sale (card-id uint) (price uint) (expires-in uint))
@@ -310,8 +315,7 @@
  (let (
    (listing (unwrap! (map-get? marketplace-listings card-id) err-not-found))
  )
-
-  (asserts! (is-eq (get seller listing) tx-sender) err-not-authorized)
+   (asserts! (is-eq (get seller listing) tx-sender) err-not-authorized)
   
    (map-delete marketplace-listings card-id)
    (map-set card-status card-id
@@ -327,7 +331,8 @@
    (ok true)
  )
 )
- 
+
+
 (define-public (buy-card (card-id uint))
  (let (
    (listing (unwrap! (map-get? marketplace-listings card-id) err-not-found))
@@ -366,7 +371,7 @@
    (increment-user-stat seller "cards-sold")
    (var-set total-)
 )
- 
+
 (define-public (add-card-experience (card-id uint) (amount uint))
  (let (
    (card (unwrap! (map-get? card-details card-id) err-not-found))
@@ -381,7 +386,6 @@
    (ok new-exp)
  )
 )
-
 
 (define-public (upgrade-card-level (card-id uint))
  (let (
@@ -405,7 +409,7 @@
        }
      )
    )
- 
+  
    (map-set card-status card-id
      (merge status
        {
@@ -419,7 +423,6 @@
  )
 )
 
- 
 ;; read-only functions
 (define-read-only (get-card-details (card-id uint))
  (ok (unwrap! (map-get? card-details card-id) err-not-found))
@@ -430,13 +433,11 @@
  (ok (unwrap! (map-get? card-ownership card-id) err-not-found))
 )
 
-
 (define-read-only (get-card-status (card-id uint))
  (ok (default-to
    {locked: false, cooldown-until: u0, last-action: u0, upgrade-count: u0}
    (map-get? card-status card-id)))
 )
-
 
 (define-read-only (get-user-stats (user principal))
  (ok (default-to
@@ -455,6 +456,4 @@
 (define-read-only (get-last-card-id)
  (ok (var-get last-card-id))
 )
-
-
-
+)
